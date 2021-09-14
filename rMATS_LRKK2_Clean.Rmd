@@ -1,0 +1,69 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    toc: True
+    toc_float: True
+    df_print: paged
+---
+
+```{r}
+#load libraries
+library(tidyverse)
+
+#load txt files
+A3SS<-read.delim("/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/rMATS_Results_unpaired/A3SS.MATS.JCEC.txt")
+A5SS<-read.delim("/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/rMATS_Results_unpaired/A5SS.MATS.JCEC.txt")
+MXE<-read.delim("/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/rMATS_Results_unpaired/MXE.MATS.JCEC.txt")
+RI<-read.delim("/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/rMATS_Results_unpaired/RI.MATS.JCEC.txt")
+SE<-read.delim("/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/rMATS_Results_unpaired/SE.MATS.JCEC.txt")
+
+```
+
+
+```{r}
+#select relevant columns
+A3SS <- select(A3SS,GeneID, geneSymbol, chr, strand, PValue, FDR) %>%
+  filter( FDR <= 0.05)
+A5SS <- select(A5SS,GeneID, geneSymbol, chr, strand, PValue, FDR) %>%
+  filter(FDR<= 0.05 )
+MXE <- select(MXE,GeneID, geneSymbol, chr, strand, PValue, FDR) %>%
+  filter(FDR<= 0.05 )
+RI <- select(RI,GeneID, geneSymbol, chr, strand, PValue, FDR) %>%
+  filter(FDR<= 0.05 )
+SE <- select(SE,GeneID, geneSymbol, chr, strand, PValue, FDR) %>%
+  filter(FDR<= 0.05 )
+
+#join tables together
+LRKK2_rMATS_list <- full_join(A3SS,A5SS) %>%
+  full_join(MXE) %>%
+  #full_join(RI) %>%
+  full_join(SE) 
+
+LRKK2_rMATS_list <- group_by(LRKK2_rMATS_list, geneSymbol) %>%
+  arrange(FDR, .by_group=T) %>% #groups by Gene name and sorts them by FDR
+  top_n(-1, FDR) %>% # selects for each gene the pone with lowest FDR
+  distinct()
+
+
+
+```
+
+
+```{r}
+
+#save
+write.csv(LRKK2_rMATS_list,'LRKK2_rMATS_clean_0.5.csv', row.names = F)
+```
+
+
+
+
+
+
+
+
+
+
+
+

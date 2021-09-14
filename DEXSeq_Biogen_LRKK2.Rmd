@@ -1,0 +1,228 @@
+---
+title: "DEXSeq_Biogen_LRKK2"
+author: "Eugenio Graceffo"
+date: "7/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#load libraries
+library(DEXSeq)
+library(tidyverse)
+library(BiocParallel)
+
+```
+
+
+
+```{r}
+txtDirectory = "/Volumes/My_Passport/Transcriptomics/Biogen_LRKK2/"
+annotationDirectory = "/Volumes/My_Passport/Transcriptomics/homo_sapiens/"
+
+countFiles = list.files(txtDirectory, pattern="sorted.txt$", full.names=TRUE)
+basename(countFiles)
+
+flattenedFile = list.files(annotationDirectory, pattern="gff$", full.names=TRUE)
+basename(flattenedFile)
+```
+```{r}
+
+groups_file_Biogen_LRKK2 <- read.table("/Volumes/My_Passport/Transcriptomics/Biogen_LRKK2/groups_file_Biogen_LRKK2.txt", quote="\"", comment.char="")
+
+sampleTable = data.frame(
+   row.names = groups_file_Biogen_LRKK2$V1,
+   condition = groups_file_Biogen_LRKK2$V2 )
+
+sampleTable
+```
+
+```{r}
+dxd = DEXSeqDataSetFromHTSeq(
+   countFiles,
+   sampleData=sampleTable,
+   design= ~ sample + exon + condition:exon,
+   flattenedfile=flattenedFile )
+```
+
+```{r}
+#filter out low counts
+keep <- rowSums(counts(dxd)) >= 10
+dxd <- dxd[keep,]
+
+
+colData(dxd)
+head( counts(dxd), 5 )
+head( featureCounts(dxd), 5 ) # to see counts of only exonic regions "this"
+split( seq_len(ncol(dxd)), colData(dxd)$exon )
+
+head( rowRanges(dxd), 3 ) # to see details of counting bins
+```
+
+```{r}
+#normalization
+dxd = estimateSizeFactors( dxd ) #normalization
+BPPARAM = MulticoreParam(4) #to run in paralel using 4 cores
+dxd = estimateDispersions( dxd, BPPARAM=BPPARAM ) #dispersion estimates
+
+plotDispEsts( dxd )
+
+#The initial per-exon dispersion estimates (shown by black points), the fitted mean-dispersion values function (red line), and the shrinked values in blue
+```
+
+```{r}
+#running differential exon usage
+dxd = testForDEU( dxd, BPPARAM=BPPARAM)
+
+dxd = estimateExonFoldChanges( dxd, BPPARAM=BPPARAM, fitExpToVar="condition") #to calculate fold changes, optional
+
+```
+
+```{r}
+#show the results
+dxr1 = DEXSeqResults( dxd )
+dxr1
+
+mcols(dxr1)$description
+
+
+
+
+table ( dxr1$padj < 0.1 ) # How many exonig regions are significant with a FDR< 0.1?
+table ( tapply( dxr1$padj < 0.05, dxr1$groupID, any ) ) # how many genes are significant FDR 5%?
+```
+
+```{r}
+#MA plot to see how the power to detect differential exon usage depends on the number of reads that map to an exon
+plotMA( dxr1, alpha=0.05, cex=0.8, ylim=c(-2, 2) )
+
+
+```
+
+```{r}
+#visualize results for CAST
+plotDEXSeq( dxr1, "ENSG00000153113", legend=TRUE, cex.axis=1.2, cex=1.3, lwd=2 )
+
+wh = (dxr1$groupID=="ENSG00000153113")
+stopifnot(sum(dxr1$padj[wh] < formals(plotDEXSeq)$FDR)==1)
+
+#to display isoforms as well
+plotDEXSeq( dxr1, "ENSG00000153113", displayTranscripts=TRUE, legend=TRUE, cex.axis=1.2, cex=1.3, lwd=2 )
+
+
+#if you wanna look at count values of individual samples
+plotDEXSeq( dxr1, "ENSG00000153113", expression=FALSE, norCounts=TRUE,
+   legend=TRUE, cex.axis=1.2, cex=1.3, lwd=2 )
+```
+```{r}
+#to display changes in exon usage
+plotDEXSeq( dxr1, "ENSG00000153113", expression=FALSE, splicing=TRUE,
+   legend=TRUE, cex.axis=1.2, cex=1.3, lwd=2 )
+
+```
+
+```{r}
+# html browsing file
+DEXSeqHTML( dxr1, FDR=0.05, color=c("#FF000080", "#0000FF80") )
+```
+
+```{r}
+#extract gene list with FDR amd log2Fold_change
+
+Biogen_LRKK2_list_DEXSeq <- data.frame(GeneID=dxr1@listData[["groupID"]], Exon_Bin=dxr1@listData[["featureID"]], Start=dxr1@listData[["genomicData"]]@ranges@start, width=dxr1@listData[["genomicData"]]@ranges@width, Mean_Counts=dxr1@listData[["exonBaseMean"]], FDR=dxr1@listData[["padj"]], log2fold_change=dxr1@listData[["log2fold_WT_LRRK2"]]) %>%
+  filter(FDR<=0.05) %>%
+ # tibble::rownames_to_column("GeneID") %>%
+  drop_na() %>%
+  separate_rows(GeneID, sep="\\+") %>% #splits multiple IDs on same row
+  group_by(GeneID) %>%
+  arrange(FDR, .by_group=T) %>% #groups by Gene name and sorts them by FDR
+  top_n(-1, FDR) %>% # selects for each gene the one with lowest FDR
+  distinct() %>%
+   mutate('End'=(Start+width)) %>%
+   select(-width) %>%
+   relocate('End', .after = 'Start')
+
+write.csv(Biogen_LRKK2_list_DEXSeq,'Biogen_LRKK2_DEXSeq_0.05.csv', row.names = F)
+
+```
+
+
+```{r}
+# Volcano Plot of results
+library(EnhancedVolcano)
+
+Volcano_list <- data.frame(GeneID=dxr1@listData[["groupID"]], FDR=dxr1@listData[["padj"]], log2fold_change=dxr1@listData[["log2fold_WT_LRKK2"]]) %>%
+   drop_na() %>%
+   separate_rows(GeneID, sep="\\+") %>% #splits multiple IDs on same row
+   group_by(GeneID) %>%
+   arrange(FDR, .by_group=T) %>% #groups by Gene name and sorts them by FDR
+   top_n(-1, FDR) %>% # selects for each gene the one with lowest FDR
+   distinct()
+
+
+
+
+FC <- 0.5
+p <- 0.05
+
+keyvals <- rep('grey75', nrow(Volcano_list))
+names(keyvals) <- rep('Not Significant', nrow(Volcano_list))
+
+#keyvals[which(abs(Volcano_list$log2fold_change) > FC & Volcano_list$FDR > p)] <- 'grey50'
+#names(keyvals)[which(abs(Volcano_list$log2fold_change) > FC & Volcano_list$FDR > p)] <- 'log2fold_change'
+
+#keyvals[which(abs(Volcano_list$log2fold_change) < FC & Volcano_list$FDR < p)] <- 'grey25'
+#names(keyvals)[which(abs(Volcano_list$log2fold_change)  < FC & Volcano_list$FDR < p)] <- '-Log10Q'
+
+keyvals[which(Volcano_list$log2fold_change < -FC & Volcano_list$FDR < p)] <- 'blue2'
+names(keyvals)[which(Volcano_list$log2fold_change  < -FC & Volcano_list$FDR < p)] <- 'Down-regulated'
+
+keyvals[which(Volcano_list$log2fold_change > FC & Volcano_list$FDR < p)] <- 'red2'
+names(keyvals)[which(Volcano_list$log2fold_change > FC & Volcano_list$FDR < p)] <- 'Up-regulated'
+
+unique(keyvals)
+unique(names(keyvals))
+
+Biogen_LRKK2_final_list <- read_csv("/Users/eugeniograceffo/Desktop/Oxford/2nd_Rotation/Transcriptomics/Biogen_LRKK2_0.05.csv")
+
+volcano_plot <- EnhancedVolcano(Volcano_list,
+    lab = Volcano_list$GeneID,
+    x = 'log2fold_change',
+    y = 'FDR',
+    selectLab = Biogen_LRKK2_final_list$GeneID ,
+    #selectLab = c('ENSG00000153113','ENSG00000142192', 'ENSG00000168002', 'ENSG00000087460', 'ENSG00000148935', 'ENSG00000138162'), #for specific genes 
+    pCutoff = 0.05,
+    FCcutoff = 0.5,
+    xlim = c(-5.5, 5.5),
+    ylim = c(0, -log10(10e-12)),
+    colCustom = keyvals,
+    xlab = bquote(~Log[2]~ 'fold change'),
+    ylab = bquote(~-Log[10] ~ italic(Padj)),
+    pointSize = 2.5,
+    #labSize = 3.0,
+    #shape = c(6, 6, 19, 16),
+    title = "Biogen_LRKK2 results",
+    subtitle = "Differential Exon Usage",
+    caption = "Fold Change cutoff 0.5; FDR cutoff, 0.05",
+    #legend=c('NS','Log (base 2) fold-change','P value', 'P value & Log (base 2) fold-change'),
+    #legend=c('','','P value', 'P value & Log (base 2) fold-change'),
+    legendPosition = "right",
+    legendLabSize = 15,
+    legendIconSize = 10,
+    col = c("grey30", "grey30", "royalblue", "red2"),
+    colAlpha = 0.8,
+    drawConnectors = TRUE,
+    widthConnectors = 0.6,
+    colConnectors = 'grey50',
+    boxedLabels=T,labSize =3)
+   # hline = c(10e-8), #adds cutoff lines
+
+volcano_plot
+
+
+ggsave("Biogen_LRKK2_Volcano.pdf", width = 40, height = 25, units = "cm")
+```
+

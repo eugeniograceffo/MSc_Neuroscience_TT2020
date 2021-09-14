@@ -1,0 +1,246 @@
+---
+title: "DEXSeq_LRKK2"
+author: "Eugenio Graceffo"
+date: "7/20/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#load libraries
+library(DEXSeq)
+library(tidyverse)
+
+```
+
+
+
+```{r}
+txtDirectory = "/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/"
+annotationDirectory = "/Volumes/My_Passport/Transcriptomics/homo_sapiens/"
+
+countFiles = list.files(txtDirectory, pattern="sorted.txt$", full.names=TRUE)
+basename(countFiles)
+
+flattenedFile = list.files(annotationDirectory, pattern="gff$", full.names=TRUE)
+basename(flattenedFile)
+```
+```{r}
+
+groups_file_LRKK2 <- read.delim("/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/groups_file_LRKK2.txt", header=FALSE)
+
+sampleTable = data.frame(
+   row.names = groups_file_LRKK2$V1,
+   condition = groups_file_LRKK2$V2 )
+
+sampleTable <- arrange(sampleTable, condition) # to get correct fold changes
+
+sampleTable
+```
+
+```{r}
+dxd = DEXSeqDataSetFromHTSeq(
+   countFiles,
+   sampleData=sampleTable,
+   design= ~ sample + exon + condition:exon,
+   flattenedfile=flattenedFile )
+```
+
+```{r}
+
+colData(dxd)
+head( counts(dxd), 5 )
+head( featureCounts(dxd), 5 ) # to see counts of only exonic regions "this"
+split( seq_len(ncol(dxd)), colData(dxd)$exon )
+
+head( rowRanges(dxd), 3 ) # to see details of counting bins
+```
+
+```{r}
+#filter out low counts
+keep <- rowSums(counts(dxd)) >= 10
+dxd <- dxd[keep,]
+```
+
+```{r}
+#normalization
+dxd = estimateSizeFactors( dxd ) #normalization
+BPPARAM = MulticoreParam(4) #to run in paralel using 4 cores
+dxd = estimateDispersions( dxd, BPPARAM=BPPARAM ) #dispersion estimates
+
+plotDispEsts( dxd )
+
+#The initial per-exon dispersion estimates (shown by black points), the fitted mean-dispersion values function (red line), and the shrinked values in blue
+```
+
+```{r}
+#running differential exon usage
+dxd = testForDEU( dxd)
+
+dxd = estimateExonFoldChanges( dxd, fitExpToVar="condition") #to calculate fold changes, optional
+
+```
+
+```{r}
+#show the results
+dxr1 = DEXSeqResults( dxd )
+dxr1
+
+mcols(dxr1)$description
+
+
+
+
+table ( dxr1$padj < 0.1 ) # How many exonig regions are significant with a FDR< 0.1?
+table ( tapply( dxr1$padj < 0.05, dxr1$groupID, any ) ) # how many genes are significant FDR 5%?
+```
+
+```{r}
+#MA plot to see how the power to detect differential exon usage depends on the number of reads that map to an exon
+plotMA( dxr1, alpha=0.05, cex=0.8, ylim=c(-5, 5) )
+
+```
+
+```{r}
+#visualize results for CAST
+plotDEXSeq( dxr1, "ENSG00000119685", legend=TRUE, cex.axis=1.2, cex=1.3, lwd=2 )
+
+wh = (dxr1$groupID=="ENSG00000153113")
+stopifnot(sum(dxr1$padj[wh] < formals(plotDEXSeq)$FDR)==1)
+
+#to display isoforms as well
+plotDEXSeq( dxr1, "ENSG00000153113", displayTranscripts=TRUE, legend=TRUE, cex.axis=1.2, cex=1.3, lwd=2 )
+
+
+#if you wanna look at count values of individual samples
+plotDEXSeq( dxr1, "ENSG00000153113", expression=FALSE, norCounts=TRUE,
+   legend=TRUE, cex.axis=1.2, cex=1.3, lwd=2 )
+```
+```{r}
+#to display changes in exon usage
+plotDEXSeq( dxr1, "ENSG00000153113", expression=FALSE, splicing=TRUE,
+   legend=TRUE, cex.axis=1.2, cex=1.3, lwd=2 )
+
+```
+
+```{r}
+# html browsing file
+DEXSeqHTML( dxr1, FDR=0.05, color=c("#FF000080", "#0000FF80") )
+```
+
+```{r}
+#extract gene list with FDR amd log2Fold_change
+library(dplyr)
+library(tidyverse)
+
+LRKK2_list_DEXSeq <- data.frame(GeneID=dxr1@listData[["groupID"]], Exon_Bin=dxr1@listData[["featureID"]], Start=dxr1@listData[["genomicData"]]@ranges@start, width=dxr1@listData[["genomicData"]]@ranges@width, Mean_Counts=dxr1@listData[["exonBaseMean"]], FDR=dxr1@listData[["padj"]], log2fold_change=dxr1@listData[["log2fold_WT_LRKK2"]]) %>%
+  filter(FDR<=0.05) %>%
+ # tibble::rownames_to_column("GeneID") %>%
+  drop_na() %>%
+  #mutate(log2fold_change=(log2fold_change * -1)) %>% # invert the sign of fold change so it's LRRK2/WT
+  separate_rows(GeneID, sep="\\+") %>% #splits multiple IDs on same row
+  group_by(GeneID) %>%
+  arrange(FDR, .by_group=T) %>% #groups by Gene name and sorts them by FDR
+  top_n(-1, FDR) %>% # selects for each gene the one with lowest FDR
+  distinct() %>%
+  mutate('End'=(Start+width)) %>%
+  dplyr::select(-width) %>%
+  relocate('End', .after = 'Start')
+
+write.csv(LRKK2_list_DEXSeq,'LRKK2_DEXSeq_0.05.csv', row.names = F)
+
+```
+
+```{r}
+# Volcano Plot of results
+library(EnhancedVolcano)
+library("biomaRt")
+ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl") #retrieves human database GRCh38.p13
+ensembl_gene_names <- getBM(mart=ensembl, attributes = c("ensembl_gene_id", "external_gene_name"), filters = "chromosome_name", values=1:22 , X, Y )
+
+ensembl_gene_names <- ensembl_gene_names %>%
+   rename(GeneID=ensembl_gene_id, Gene=external_gene_name)
+
+  ensembl_gene_names <- rbind(ensembl_gene_names, c("ENSG00000215301", "DDX3X")) # adding genes on chr X
+
+Volcano_list <- data.frame(GeneID=dxr1@listData[["groupID"]], FDR=dxr1@listData[["padj"]], log2fold_change=dxr1@listData[["log2fold_WT_LRKK2"]]) %>%
+   drop_na() %>%
+   separate_rows(GeneID, sep="\\+") %>% #splits multiple IDs on same row
+   group_by(GeneID) %>%
+   arrange(FDR, .by_group=T) %>% #groups by Gene name and sorts them by FDR
+   top_n(-1, FDR) %>% # selects for each gene the one with lowest FDR
+   distinct()
+
+#Volcano_list <- mutate(Volcano_list, log2fold_change=(log2fold_change * -1)) # invert the sign of fold change so it's LRRK2/WT
+
+Volcano_list <- inner_join(Volcano_list, ensembl_gene_names, by="GeneID")  ### Im losing samples
+
+Volcano_list_genes <- data.frame(Gene=Volcano_list$Gene, FDR=Volcano_list$FDR, log2fold_change=Volcano_list$log2fold_change)
+
+#Volcano_list_genes <- mutate(Volcano_list_genes, log2fold_change=(log2fold_change * -1))
+
+
+
+FC <- 0
+p <- 0.05
+
+keyvals <- rep('grey75', nrow(Volcano_list_genes))
+names(keyvals) <- rep('Not Significant', nrow(Volcano_list_genes))
+
+#keyvals[which(abs(Volcano_list$log2fold_change) > FC & Volcano_list$FDR > p)] <- 'grey50'
+#names(keyvals)[which(abs(Volcano_list$log2fold_change) > FC & Volcano_list$FDR > p)] <- 'log2fold_change'
+
+#keyvals[which(abs(Volcano_list$log2fold_change) < FC & Volcano_list$FDR < p)] <- 'grey25'
+#names(keyvals)[which(abs(Volcano_list$log2fold_change)  < FC & Volcano_list$FDR < p)] <- '-Log10Q'
+
+keyvals[which(Volcano_list_genes$log2fold_change < -FC & Volcano_list_genes$FDR < p)] <- 'blue2'
+names(keyvals)[which(Volcano_list_genes$log2fold_change  < -FC & Volcano_list_genes$FDR < p)] <- 'Down-regulated'
+
+keyvals[which(Volcano_list_genes$log2fold_change > FC & Volcano_list_genes$FDR < p)] <- 'red2'
+names(keyvals)[which(Volcano_list_genes$log2fold_change > FC & Volcano_list_genes$FDR < p)] <- 'Up-regulated'
+
+unique(keyvals)
+unique(names(keyvals))
+
+LRKK2_final_list <- read_csv("/Users/eugeniograceffo/Desktop/Oxford/2nd_Rotation/Transcriptomics/LRKK2_0.05.csv")
+
+ volcano_plot <- EnhancedVolcano(Volcano_list_genes,
+    lab = Volcano_list_genes$Gene ,
+    x = 'log2fold_change',
+    y = 'FDR',
+    #selectLab = LRKK2_final_list$genes ,
+    selectLab = c('IFT43','TTLL5', 'ZNF320', 'GAS5', 'NIN', 'DDX3X', 'SRSF11'), #for specific genes 
+    pCutoff = 0.05,
+    FCcutoff = 0,
+    xlim = c(-20, 20), # 5.5
+    ylim = c(0, -log10(10e-12)),
+    colCustom = keyvals,
+    xlab = bquote(~Log[2]~ 'fold change'),
+    ylab = bquote(~-Log[10] ~ italic(Padj)),
+    pointSize = 2.5,
+    #labSize = 3.0,
+    #shape = c(6, 6, 19, 16),
+    title = "LRRK2 results",
+    subtitle = "Differential Exon Usage",
+    caption = "FDR cutoff 0.05",
+    #legend=c('NS','Log (base 2) fold-change','P value', 'P value & Log (base 2) fold-change'),
+    #legend=c('','','P value', 'P value & Log (base 2) fold-change'),
+    legendPosition = "right",
+    legendLabSize = 15,
+    legendIconSize = 10,
+    col = c("grey30", "grey30", "royalblue", "red2"),
+    colAlpha = 0.8,
+    drawConnectors = TRUE,
+    widthConnectors = 0.6,
+    colConnectors = 'grey50',
+    boxedLabels=T,labSize =3)
+   # hline = c(10e-8), #adds cutoff lines
+
+volcano_plot
+
+
+ggsave("LRKK2_Volcano.pdf", width = 40, height = 25, units = "cm")
+```

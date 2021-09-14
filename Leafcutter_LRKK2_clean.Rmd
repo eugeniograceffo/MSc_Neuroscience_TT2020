@@ -1,0 +1,54 @@
+---
+title: "Leafcutter_LRKK2_clean"
+output: 
+html_document:
+    toc: True
+    toc_float: True
+    df_print: paged
+---
+
+```{r}
+#load libraries
+library(tidyverse)
+```
+
+```{r}
+#loaded R file from leafcutter
+load("/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/LRKK2_clean.RData")
+
+#load sample data
+LRKK2_leafcutter_ds_cluster_significance <- read.delim("/Volumes/My_Passport/Transcriptomics/LRKK2_bam/leafcutter_ds_cluster_significance.txt")
+
+```
+
+```{r}
+#separate columns to highlight cluster ID
+LRKK2_leafcutter_ds_cluster_significance_sorted <- LRKK2_leafcutter_ds_cluster_significance %>%
+  separate('cluster', c('Chromosome','Cluster_ID'),':') 
+
+clusters <- rename(clusters, Cluster_ID=clusterID) %>%
+  select(-gene)
+
+```
+
+```{r}
+#merge only tables needed together to get list of gene names + FDR + Pvalue
+
+LRKK2_final <- select(clusters, Cluster_ID, FDR)
+LRKK2_PValue <- select(LRKK2_leafcutter_ds_cluster_significance_sorted, Cluster_ID, genes, p.adjust)
+
+LRKK2_final <- inner_join(LRKK2_final, LRKK2_PValue, by=c('Cluster_ID')) %>%
+  select(genes,p.adjust,FDR) %>%
+  filter(FDR<= 0.05 ) %>%
+  drop_na() %>%
+  group_by( genes) %>%
+  arrange(FDR, .by_group=T) %>% #groups by Gene name and sorts them by FDR
+  top_n(-1, FDR) %>% # selects for each gene the pone with lowest FDR
+  distinct()
+
+
+
+#Save
+write.csv(LRKK2_final,'LRKK2_LeafCutter_Clean_0.5.csv', row.names = F)
+
+```

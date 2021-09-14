@@ -1,0 +1,293 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    toc: True
+    toc_float: True
+    df_print: paged
+---
+
+```{r}
+#load libraries
+library(tidyverse)
+library(readr)
+
+#load cvs files
+LRKK2_rMATS <- read_csv("/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/LRKK2_rMATS_Clean_0.5.csv")
+LRKK2_LeafCutter <- read_csv("/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/LRKK2_LeafCutter_Clean_0.5.csv")
+
+GBA_rMATS <- read_csv("/Volumes/My_Passport/Transcriptomics/GBA_Clean_Leaf/GBA_rMATS_Clean_0.5.csv")
+GBA_LeafCutter <- read_csv("/Volumes/My_Passport/Transcriptomics/GBA_Clean_Leaf/GBA_LeafCutter_Clean_0.05.csv")
+
+Biogen_LRRK2_rMATS <- read_csv("/Volumes/My_Passport/Transcriptomics/Biogen_LRKK2/Biogen_LRKK2_rMATS_Clean_0.5.csv")
+Biogen_LRRK2_LeafCutter <- read_csv("/Volumes/My_Passport/Transcriptomics/Biogen_LRKK2/Biogen_LRRK2_LeafCutter_Clean_0.05.csv")
+
+```
+
+```{r}
+#separate synonyms of gene names in Leafcutter outputs
+GBA_LeafCutter <- separate_rows(GBA_LeafCutter, gene, sep=",")
+GBA_LeafCutter <- group_by(GBA_LeafCutter, gene) %>%
+  arrange(FDR, .by_group=T) %>% #groups by Gene name and sorts them by FDR
+  top_n(-1, FDR) %>% # selects for each gene the pone with lowest FDR
+  distinct()
+
+LRKK2_LeafCutter <- separate_rows(LRKK2_LeafCutter, genes, sep=",") #%>%
+ LRKK2_LeafCutter <- group_by(LRKK2_LeafCutter, genes) %>%
+  arrange(FDR, .by_group=T) %>% #groups by Gene name and sorts them by FDR
+  top_n(-1, FDR) %>% # selects for each gene the pone with lowest FDR
+  distinct()
+ 
+Biogen_LRRK2_LeafCutter <- separate_rows(Biogen_LRRK2_LeafCutter, gene, sep=",") #%>%
+ Biogen_LRRK2_LeafCutter <- group_by(Biogen_LRRK2_LeafCutter, gene) %>%
+  arrange(FDR, .by_group=T) %>% #groups by Gene name and sorts them by FDR
+  top_n(-1, FDR) %>% # selects for each gene the pone with lowest FDR
+  distinct()
+
+```
+
+
+```{r}
+#rname FDR and Pvalue columns
+ GBA_rMATS <-rename(GBA_rMATS, FDR_rMATS=FDR) %>%
+  rename(P_rMATS=PValue) %>%
+  rename(gene=geneSymbol)
+
+GBA_LeafCutter <-rename(GBA_LeafCutter, FDR_LeafCutter=FDR) %>%
+  rename(P_Leafcutter=p.adjust) 
+
+
+LRKK2_rMATS <-rename(LRKK2_rMATS, FDR_rMATS=FDR) %>%
+  rename(P_rMATS=PValue) %>%
+  rename(genes=geneSymbol)
+
+LRKK2_LeafCutter <-rename(LRKK2_LeafCutter, FDR_LeafCutter=FDR) %>%
+  rename(P_Leafcutter=p.adjust) 
+
+
+Biogen_LRRK2_rMATS <-rename(Biogen_LRRK2_rMATS, FDR_rMATS=FDR) %>%
+  rename(P_rMATS=PValue) %>%
+  rename(gene=geneSymbol)
+
+Biogen_LRRK2_LeafCutter <-rename(Biogen_LRRK2_LeafCutter, FDR_LeafCutter=FDR) %>%
+  rename(P_Leafcutter=p.adjust) 
+
+```
+
+```{r}
+#merge tables together
+Common_Genes_GBA <- inner_join(GBA_rMATS, GBA_LeafCutter, by=c('gene'))
+Common_Genes_LRKK2 <- inner_join(LRKK2_rMATS, LRKK2_LeafCutter, by=c('genes'))
+Common_Genes_Biogen_LRRK2 <- inner_join(Biogen_LRRK2_rMATS, Biogen_LRRK2_LeafCutter, by=c('gene'))
+
+```
+
+```{r}
+#Save
+
+write.csv(Common_Genes_GBA,'GBA_Total_Clean_0.05.csv', row.names = F)
+write.csv(Common_Genes_LRKK2,'LRKK2_Total_Clean_0.05.csv', row.names = F)
+
+#write.csv(GBA_LeafCutter,'GBA_synonyms.csv', row.names = F )
+#write.csv(LRKK2_LeafCutter,'LRKK2_synonyms.csv', row.names = F )
+```
+
+```{r}
+#adding DEXSeq Results GBA
+
+GBA_DEXSeq <- read_csv("/Volumes/My_Passport/Transcriptomics/GBA_Clean_Leaf/GBA_DEXSeq_0.05.csv") #load data
+
+#rname FDR and Pvalue columns
+ GBA_DEXSeq <-rename(GBA_DEXSeq, FDR_DEXSeq=FDR)
+  
+ 
+ #merging results together
+ Common_Genes_GBA_test <- inner_join(Common_Genes_GBA, GBA_DEXSeq, by=c('GeneID'))
+
+ #counting intersections for Venn Diagrams 
+ a <- inner_join(GBA_rMATS, GBA_DEXSeq,  by=c('GeneID'))
+ensembl_gene_names<- rename(ensembl_gene_names, gene="Gene")
+ b <- inner_join(GBA_LeafCutter, ensembl_gene_names,  by=c('gene')) %>%
+   inner_join(GBA_DEXSeq, by=c('GeneID'))
+ 
+ #Clean up p values
+ Common_Genes_GBA_test <- Common_Genes_GBA_test %>%
+   select(-P_rMATS, -P_Leafcutter) %>%
+   relocate('FDR_LeafCutter', .before='FDR_DEXSeq') %>%
+   relocate('FDR_rMATS', .before='FDR_DEXSeq') %>%
+   relocate('strand', .after='End') %>%
+   rename(Chr=chr) %>%
+   relocate('Chr', .before='Start') %>%
+   mutate(Chr = str_remove(Chr, fixed("chr")))
+ 
+ #adding a ranking score based on average of the logf2Fold change and DEXSeq FDR value
+ Common_Genes_GBA_test$Score1 <- rank(-abs(Common_Genes_GBA_test$log2fold_change))
+ Common_Genes_GBA_test$Score2 <- rank(Common_Genes_GBA_test$FDR_DEXSeq)
+ #Common_Genes_GBA_test$Score3 <- rank(Common_Genes_GBA_test$FDR_rMATS)
+ #Common_Genes_GBA_test$Score4 <- rank(Common_Genes_GBA_test$FDR_LeafCutter)
+ 
+ Common_Genes_GBA_test$Score <- rank((Common_Genes_GBA_test$Score1 + Common_Genes_GBA_test$Score2)/2)
+ 
+ Common_Genes_GBA_test <- select(Common_Genes_GBA_test, -Score1, -Score2)
+
+ 
+ #save 
+ Common_Genes_GBA_test <- arrange(Common_Genes_GBA_test, Score)
+ 
+ GBA_Gene_List <- select(Common_Genes_GBA_test, GeneID, gene, Mean_Counts,FDR_LeafCutter, FDR_rMATS, FDR_DEXSeq, log2fold_change, Score)
+ 
+ GBA_Bins <- select(Common_Genes_GBA_test, GeneID, gene, Exon_Bin, Chr, Start, End, Strand='strand', Score)
+ 
+ GBA_powerpoint <- select(GBA_Gene_List, gene, FDR_DEXSeq, log2fold_change, Score)
+ 
+ GBA_powerpoint_2 <- select(GBA_Gene_List, -GeneID)
+```
+
+ 
+ 
+```{r}
+ 
+ write.csv(Common_Genes_GBA_test,'GBA_0.05.csv', row.names = F)
+ write.csv(GBA_Gene_List,'GBA_Gene_List.csv', row.names = F)
+ write.csv(GBA_Bins,'GBA_Bins.csv', row.names = F)
+
+```
+
+```{r}
+#adding DEXSeq Results LRKK2
+
+LRKK2_DEXSeq <- read_csv("/Volumes/My_Passport/Transcriptomics/LRKK2_Clean/LRKK2_DEXSeq_0.05.csv") #load data
+
+#rname FDR and Pvalue columns
+ LRKK2_DEXSeq <-rename(LRKK2_DEXSeq, FDR_DEXSeq=FDR)
+  
+ 
+ #merging results together
+ Common_Genes_LRKK2_test <- inner_join(Common_Genes_LRKK2, LRKK2_DEXSeq, by=c('GeneID'))
+ 
+  #counting intersections for Venn Diagrams 
+ a <- inner_join(LRKK2_rMATS, LRKK2_DEXSeq,  by=c('GeneID'))
+ ensembl_gene_names<- rename(ensembl_gene_names, genes="gene")
+ b <- inner_join(LRKK2_LeafCutter, ensembl_gene_names,  by=c('genes')) %>%
+   inner_join(LRKK2_DEXSeq, by=c('GeneID'))
+ 
+ 
+  #Clean up p values
+ Common_Genes_LRKK2_test <- Common_Genes_LRKK2_test %>%
+   select(-P_rMATS, -P_Leafcutter) %>%
+   relocate('FDR_LeafCutter', .before='FDR_DEXSeq') %>%
+   relocate('FDR_rMATS', .before='FDR_DEXSeq') %>%
+   relocate('strand', .after='End') %>%
+   rename(Chr=chr) %>%
+   relocate('Chr', .before='Start') %>%
+   mutate(Chr = str_remove(Chr, fixed("chr")))
+ 
+ #adding a ranking score by the logf2Fold change
+ Common_Genes_LRKK2_test$Score1 <- rank(-abs(Common_Genes_LRKK2_test$log2fold_change))
+ Common_Genes_LRKK2_test$Score2 <- rank(Common_Genes_LRKK2_test$FDR_DEXSeq)
+ #Common_Genes_LRKK2_test$Score3 <- rank(Common_Genes_LRKK2_test$FDR_rMATS)
+ #Common_Genes_LRKK2_test$Score4 <- rank(Common_Genes_LRKK2_test$FDR_LeafCutter)
+ 
+ Common_Genes_LRKK2_test$Score <- rank((Common_Genes_LRKK2_test$Score1 + Common_Genes_LRKK2_test$Score2)/2)
+ 
+ Common_Genes_LRKK2_test <- select(Common_Genes_LRKK2_test, -Score1, -Score2)
+
+ 
+
+ 
+ #save 
+ Common_Genes_LRKK2_test <- arrange(Common_Genes_LRKK2_test, Score)
+
+ 
+LRKK2_Gene_List <- select(Common_Genes_LRKK2_test, GeneID, genes, Mean_Counts,FDR_LeafCutter, FDR_rMATS, FDR_DEXSeq, log2fold_change, Score)
+ 
+ LRKK2_Bins <- select(Common_Genes_LRKK2_test, GeneID, genes, Exon_Bin, Chr, Start, End, Strand='strand', Score)
+ 
+ LRKK2_powerpoint <- select(LRKK2_Gene_List, genes, FDR_DEXSeq, log2fold_change, Score)
+ 
+ LRKK2_powerpoint_2 <- select(LRKK2_Gene_List, -GeneID)
+ 
+```
+ 
+ 
+```{r}
+ 
+ write.csv(Common_Genes_LRKK2_test,'LRKK2_0.05.csv', row.names = F)
+ write.csv(LRKK2_Gene_List,'LRKK2_Gene_List.csv', row.names = F)
+ write.csv(LRKK2_Bins,'LRKK2_Bins.csv', row.names = F)
+
+
+```
+
+
+```{r}
+#adding DEXSeq Results Biogen_LRRK2
+
+Biogen_LRRK2_DEXSeq <- read_csv("/Volumes/My_Passport/Transcriptomics/Biogen_LRKK2/Biogen_LRKK2_DEXSeq_0.05.csv") #load data
+
+#rname FDR and Pvalue columns
+ Biogen_LRRK2_DEXSeq <-rename(Biogen_LRRK2_DEXSeq, FDR_DEXSeq=FDR)
+  
+ 
+ #merging results together
+ Common_Genes_Biogen_LRRK2_test <- inner_join(Common_Genes_Biogen_LRRK2, Biogen_LRRK2_DEXSeq, by=c('GeneID'))
+ 
+   #counting intersections for Venn Diagrams 
+ a <- inner_join(Biogen_LRRK2_rMATS, Biogen_LRRK2_DEXSeq,  by=c('GeneID'))
+ ensembl_gene_names<- rename(ensembl_gene_names, gene="Gene")
+ b <- inner_join(Biogen_LRRK2_LeafCutter, ensembl_gene_names,  by=c('gene')) %>%
+   inner_join( Biogen_LRRK2_DEXSeq, by=c('GeneID'))
+ 
+ 
+ #Clean up p values
+ Common_Genes_Biogen_LRRK2_test <- Common_Genes_Biogen_LRRK2_test %>%
+   select(-P_rMATS, -P_Leafcutter) %>%
+   relocate('FDR_LeafCutter', .before='FDR_DEXSeq') %>%
+   relocate('FDR_rMATS', .before='FDR_DEXSeq') %>%
+   relocate('strand', .after='End') %>%
+   rename(Chr=chr) %>%
+   relocate('Chr', .before='Start') %>%
+   mutate(Chr = str_remove(Chr, fixed("chr")))
+ 
+ #adding a ranking score based on average of the logf2Fold change and DEXSeq FDR value
+ Common_Genes_Biogen_LRRK2_test$Score1 <- rank(-abs(Common_Genes_Biogen_LRRK2_test$log2fold_change))
+ Common_Genes_Biogen_LRRK2_test$Score2 <- rank(Common_Genes_Biogen_LRRK2_test$FDR_DEXSeq)
+ #Common_Genes_Biogen_LRRK2_test$Score3 <- rank(Common_Genes_Biogen_LRRK2_test$FDR_rMATS)
+ #Common_Genes_Biogen_LRRK2_test$Score4 <- rank(Common_Genes_Biogen_LRRK2_test$FDR_LeafCutter)
+ 
+ Common_Genes_Biogen_LRRK2_test$Score <- rank((Common_Genes_Biogen_LRRK2_test$Score1 + Common_Genes_Biogen_LRRK2_test$Score2)/2)
+ 
+ Common_Genes_Biogen_LRRK2_test <- select(Common_Genes_Biogen_LRRK2_test, -Score1, -Score2)
+
+ 
+ #save 
+ Common_Genes_Biogen_LRRK2_test <- arrange(Common_Genes_Biogen_LRRK2_test, Score)
+ 
+ Biogen_LRRK2_Gene_List <- select(Common_Genes_Biogen_LRRK2_test, GeneID, gene, Mean_Counts,FDR_LeafCutter, FDR_rMATS, FDR_DEXSeq, log2fold_change, Score)
+ 
+ Biogen_LRRK2_Bins <- select(Common_Genes_Biogen_LRRK2_test, GeneID, gene, Exon_Bin, Chr, Start, End, Strand='strand', Score)
+ 
+ write.csv(Common_Genes_Biogen_LRRK2_test,'Biogen_LRRK2_0.05.csv', row.names = F)
+ write.csv(Biogen_LRRK2_Gene_List,'Biogen_LRRK2_Gene_List.csv', row.names = F)
+ write.csv(Biogen_LRRK2_Bins,'Biogen_LRRK2_Bins.csv', row.names = F)
+
+```
+
+```{r}
+#biogen for powerpoint
+
+rMATS_pp_Biogen <- dplyr::select(Biogen_LRRK2_rMATS, gene, FDR_rMATS)
+DEXSeq_pp_Biogen <- inner_join(Biogen_LRRK2_DEXSeq, ensembl_gene_names, by="GeneID") %>%
+  dplyr::select(-GeneID,-Exon_Bin, -Start, -End) %>%
+  relocate('Gene', .before="Mean_Counts")
+DEXSeq_pp_Biogen$Score1 <- rank(-abs(DEXSeq_pp_Biogen$log2fold_change))
+DEXSeq_pp_Biogen$Score2 <- rank(DEXSeq_pp_Biogen$FDR_DEXSeq)
+
+DEXSeq_pp_Biogen$Score <- rank((DEXSeq_pp_Biogen$Score1 + DEXSeq_pp_Biogen$Score2)/2)
+ 
+DEXSeq_pp_Biogen <- dplyr::select(DEXSeq_pp_Biogen, -Score1, -Score2)
+
+Leafcutter_pp_Biogeb <- dplyr::select(Biogen_LRRK2_LeafCutter, gene, FDR_LeafCutter)
+
+```
+

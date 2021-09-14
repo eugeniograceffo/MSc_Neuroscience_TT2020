@@ -1,0 +1,62 @@
+---
+title: "R Notebook"
+output: 
+html_document:
+    toc: True
+    toc_float: True
+    df_print: paged
+---
+
+```{r}
+#load libraries
+library(tidyverse)
+```
+
+```{r}
+#loaded R file from leafcutter
+load("/Volumes/My_Passport/Transcriptomics/GBA_Clean_Leaf/GBA_clean.RData")
+
+#load sample data
+GBA_leafcutter_ds_cluster_significance <- read.delim("/Volumes/My_Passport/Transcriptomics/GBA_Clean_Leaf/leafcutter_ds_cluster_significance.txt")
+
+```
+
+```{r}
+#separate columns to highlight cluster ID
+GBA_leafcutter_ds_cluster_significance_sorted <- GBA_leafcutter_ds_cluster_significance %>%
+  separate('cluster', c('Chromosome','Cluster_ID'),':') 
+
+clusters <- rename(clusters, Cluster_ID=clusterID) %>%
+  select(-gene)
+
+gene_names <- select(introns,clusterID,gene) %>%
+  rename(Cluster_ID=clusterID) %>%
+  distinct() %>%
+  filter(gene!= ".")
+
+```
+
+```{r}
+#merge only tables needed together to get list of gene names + FDR + Pvalue
+
+GBA_final <- select(clusters, Cluster_ID, FDR)
+GBA_PValue <- select(GBA_leafcutter_ds_cluster_significance_sorted, Cluster_ID, p.adjust)
+
+GBA_list <- inner_join(gene_names, GBA_PValue, by=c('Cluster_ID'))  %>%
+  inner_join(GBA_final, by=c('Cluster_ID')) %>%
+  select(gene,p.adjust,FDR) %>%
+  filter(FDR<= 0.05 ) %>%
+  drop_na() %>%
+  group_by( gene) %>%
+  arrange(FDR, .by_group=T) %>% #groups by Gene name and sorts them by FDR
+  top_n(-1, FDR) %>% # selects for each gene the pone with lowest FDR
+  distinct()
+
+
+#Save
+write.csv(GBA_list,'GBA_LeafCutter_Clean_0.05.csv', row.names = F)
+
+```
+
+
+
